@@ -6,10 +6,13 @@ const requestId = require("./middleware/requestId");
 const authRoutes = require("./routes/authRoutes");
 const accountRoutes = require("./routes/accountRoutes");
 const transactionRoutes = require("./routes/transactionRoutes");
+const cors = require("./middleware/cors");
+const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
 app.use(requestId);
+app.use(cors);
 app.use(express.json());
 
 app.get("/", (req, res) => {
@@ -22,6 +25,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/accounts", accountRoutes);
 
 app.use("/api/transactions", transactionRoutes);
+
+app.use("/api/notifications", notificationRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 255 255 255;
+    --foreground: 15 23 32;
+
+    --surface: 248 250 251;
+
+    --card: 255 255 255;
+    --card-foreground: 15 23 32;
+
+    --popover: 255 255 255;
+    --popover-foreground: 15 23 32;
+
+    --primary: 14 58 92;
+    --primary-foreground: 255 255 255;
+
+    --secondary: 240 244 247;
+    --secondary-foreground: 30 47 62;
+
+    --muted: 240 244 247;
+    --muted-foreground: 100 116 130;
+
+    --accent: 236 242 246;
+    --accent-foreground: 14 58 92;
+
+    --destructive: 179 38 38;
+    --destructive-foreground: 255 255 255;
+
+    --success: 15 111 79;
+    --success-foreground: 255 255 255;
+
+    --warning: 146 87 8;
+    --warning-foreground: 255 255 255;
+
+    --border: 225 231 236;
+    --input: 209 218 226;
+    --ring: 14 58 92;
+
+    --radius: 0.625rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground text-base leading-relaxed antialiased;
+    font-family: "Inter Tight", system-ui, -apple-system, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-semibold tracking-tight text-foreground;
+  }
+
+  /* Money and account numbers read better with tabular figures */
+  .numeric {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+}

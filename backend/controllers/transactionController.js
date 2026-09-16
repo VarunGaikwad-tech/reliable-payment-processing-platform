@@ -3,7 +3,7 @@ const transactionService = require("../services/transactionService");
 const transfer = async (req, res) => {
   const {
     fromAccountId,
-    toAccountId,
+    toAccountNumber,
     amount,
   } = req.body;
 
@@ -14,7 +14,7 @@ const transfer = async (req, res) => {
     await transactionService.transfer(
       req.user.userId,
       fromAccountId,
-      toAccountId,
+      toAccountNumber,
       amount,
       idempotencyKey,
       req.requestId
@@ -51,7 +51,29 @@ const getTransactionHistory = async (req, res, next) => {
   }
 };
 
+const getTransactionById = async (
+  req,
+  res,
+  next
+) => {
+  try {
+    const transaction =
+      await transactionService.getTransactionById(
+        req.user.userId,
+        req.params.transactionId
+      );
+
+    res.status(200).json({
+      success: true,
+      transaction,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   transfer,
   getTransactionHistory,
+  getTransactionById,
 };

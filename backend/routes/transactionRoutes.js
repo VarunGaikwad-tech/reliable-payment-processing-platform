@@ -24,4 +24,10 @@ router.get(
   transactionController.getTransactionHistory
 );
 
+router.get(
+  "/:transactionId",
+  protect,
+  transactionController.getTransactionById
+);
+
 module.exports = router;

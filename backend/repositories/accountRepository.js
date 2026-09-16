@@ -30,8 +30,8 @@ const createAccount = async (
   return result.rows[0];
 };
 
-const findByAccountNumber = async (accountNumber) => {
-  const result = await pool.query(
+const findByAccountNumber = async (client, accountNumber) => {
+  const result = await client.query(
     `
     SELECT
       id,
@@ -201,6 +201,7 @@ const creditAccount = async (client, accountId, amount) => {
 
   return result.rows[0];
 };
+
 
 module.exports = {
   createAccount,

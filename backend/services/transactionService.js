@@ -16,7 +16,7 @@ const logger = require("../utils/logger");
 const transfer = async (
   userId,
   fromAccountId,
-  toAccountId,
+  toAccountNumber,
   amount,
   idempotencyKey,
   requestId
@@ -35,26 +35,27 @@ const transfer = async (
     );
   }
 
-  if (!fromAccountId || !toAccountId || amount === undefined || amount === null) {
+  if (!fromAccountId || !toAccountNumber  || amount === undefined || amount === null) {
     throw new AppError(
       "Sender account, receiver account and amount are required",
       400
     );
   }
-
-  if (!isUuid(fromAccountId) || !isUuid(toAccountId)) {
-    throw new AppError("Invalid account ID", 400);
+  if (!isUuid(fromAccountId)) {
+    throw new AppError("Invalid sender account ID", 400);
   }
+  if (
+    typeof toAccountNumber !== "string" ||
+    !toAccountNumber.trim()
+  ) {
+    throw new AppError("Receiver account number is required", 400);
+  }
+  // if (!isUuid(fromAccountId) || !isUuid(toAccountId)) {
+  //   throw new AppError("Invalid account ID", 400);
+  // }
 
   if (idempotencyKey.length > 255) {
     throw new AppError("Idempotency-Key header is too long", 400);
-  }
-
-  if (fromAccountId === toAccountId) {
-    throw new AppError(
-      "Sender and receiver accounts must be different",
-      400
-    );
   }
 
   if (!Number.isSafeInteger(amount) || amount <= 0) {
@@ -63,14 +64,36 @@ const transfer = async (
       400
     );
   }
-  const requestHash = createTransferRequestHash({
-    fromAccountId,
-    toAccountId,
-    amount,
-  });
 
   let replayed = false;
   const completedTransaction = await withTransaction(async (client) => {
+    const receiverAccount =
+      await accountRepository.findByAccountNumber(
+      client,
+      toAccountNumber.trim()
+    );
+
+    if (!receiverAccount) {
+      throw new AppError(
+        "Receiver account not found",
+        404
+      );
+    }
+
+    const toAccountId = receiverAccount.id;
+
+    if (fromAccountId === toAccountId) {
+      throw new AppError(
+        "Sender and receiver accounts must be different",
+        400
+      );
+    }
+
+    const requestHash = createTransferRequestHash({
+      fromAccountId,
+      toAccountId,
+      amount,
+    });
 
     const expiresAt = new Date(
       Date.now() + 24 * 60 * 60 * 1000
@@ -162,7 +185,6 @@ const transfer = async (
       fromAccountId < toAccountId
         ? toAccountId
         : fromAccountId;
-
     // -----------------------------------------
     // 2. Lock both accounts
     // -----------------------------------------
@@ -199,11 +221,6 @@ const transfer = async (
 
     const senderAccount =
       firstAccount.id === fromAccountId
-        ? firstAccount
-        : secondAccount;
-
-    const receiverAccount =
-      firstAccount.id === toAccountId
         ? firstAccount
         : secondAccount;
 
@@ -443,7 +460,46 @@ const getTransactionHistory = async (
   });
 };
 
+const getTransactionById = async (
+  userId,
+  transactionId
+) => {
+  if (!userId) {
+    throw new AppError(
+      "Authentication required",
+      401
+    );
+  }
+
+  if (!isUuid(transactionId)) {
+    throw new AppError(
+      "Invalid transaction ID",
+      400
+    );
+  }
+
+  const transaction = await withTransaction(
+    async (client) => {
+      return transactionRepository.findByIdForUser(
+        client,
+        transactionId,
+        userId
+      );
+    }
+  );
+
+  if (!transaction) {
+    throw new AppError(
+      "Transaction not found",
+      404
+    );
+  }
+
+  return transaction;
+};
+
 module.exports = {
   transfer,
   getTransactionHistory,
+  getTransactionById,
 };

@@ -289,4 +289,115 @@ describe("Transfer concurrency integration", () => {
       client.release();
     }
   });
+  test("concurrent transfers cannot spend the same available balance twice", async () => {
+    const competingAmount = 70000; // ₹700
+    const competingKey1 = `balance-test-${crypto.randomUUID()}`;
+    const competingKey2 = `balance-test-${crypto.randomUUID()}`;
+
+    const client = await pool.connect();
+
+    try {
+      // Reset the accounts for this isolated concurrency scenario.
+      await client.query(
+        `
+        UPDATE accounts
+        SET balance = CASE
+          WHEN id = $1 THEN $3
+          WHEN id = $2 THEN 0
+        END
+        WHERE id IN ($1, $2)
+        `,
+        [
+          senderAccountId,
+          receiverAccountId,
+          startingBalance,
+        ]
+      );
+    } finally {
+      client.release();
+    }
+
+    const results = await Promise.allSettled([
+      transfer(
+        userId,
+        senderAccountId,
+        receiverAccountId,
+        competingAmount,
+        competingKey1
+      ),
+      transfer(
+        userId,
+        senderAccountId,
+        receiverAccountId,
+        competingAmount,
+        competingKey2
+      ),
+    ]);
+
+    const successfulTransfers = results.filter(
+      (result) => result.status === "fulfilled"
+    );
+
+    const failedTransfers = results.filter(
+      (result) => result.status === "rejected"
+    );
+
+    // Exactly one request can spend ₹700 from a ₹1000 balance.
+    expect(successfulTransfers).toHaveLength(1);
+    expect(failedTransfers).toHaveLength(1);
+
+    expect(failedTransfers[0].reason).toMatchObject({
+      message: "Insufficient balance",
+      statusCode: 400,
+    });
+
+    const clientAfter = await pool.connect();
+
+    try {
+      const accountResult = await clientAfter.query(
+        `
+        SELECT id, balance
+        FROM accounts
+        WHERE id IN ($1, $2)
+        `,
+        [senderAccountId, receiverAccountId]
+      );
+
+      const sender = accountResult.rows.find(
+        (account) => account.id === senderAccountId
+      );
+
+      const receiver = accountResult.rows.find(
+        (account) => account.id === receiverAccountId
+      );
+
+      // Only one ₹700 transfer should have succeeded.
+      expect(sender.balance).toBe(
+        String(startingBalance - competingAmount)
+      );
+
+      expect(receiver.balance).toBe(
+        String(competingAmount)
+      );
+
+      // Only one successful transaction should exist for these two keys.
+      const transactionResult = await clientAfter.query(
+        `
+        SELECT id, status
+        FROM transactions
+        WHERE id IN (
+          SELECT transaction_id
+          FROM idempotency_keys
+          WHERE key IN ($1, $2)
+        )
+        `,
+        [competingKey1, competingKey2]
+      );
+
+      expect(transactionResult.rowCount).toBe(1);
+      expect(transactionResult.rows[0].status).toBe("SUCCESS");
+    } finally {
+      clientAfter.release();
+    }
+  });
 });
