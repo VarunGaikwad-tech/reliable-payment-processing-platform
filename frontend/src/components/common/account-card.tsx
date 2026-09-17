@@ -27,12 +27,6 @@ export function AccountCard({
           <p className="numeric mt-1 text-2xl font-semibold">{formatPaise(account.balance, account.currency)}</p>
           <p className="mt-1 text-xs text-muted-foreground">{account.currency}</p>
         </div>
-        {showId && (
-          <div className="mt-5 border-t border-border pt-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Account ID (share to receive)</p>
-            <p className="numeric mt-1 break-all text-xs">{account.id}</p>
-          </div>
-        )}
         {footer && <div className="mt-5 border-t border-border pt-4">{footer}</div>}
 
       </CardContent>
