@@ -1,36 +1,10 @@
 # Reliable Distributed Payment Processing Platform
 
-A production-style, reliability-focused payment processing platform built to demonstrate backend engineering, distributed systems, database correctness, asynchronous processing, concurrency control, and fault-tolerant application design.
+A production-style payment processing platform built to demonstrate backend engineering, distributed systems, database correctness, concurrency control, asynchronous processing, and reliability patterns.
 
-This project simulates an internal payment platform where authenticated users can manage financial accounts and transfer funds between accounts.
+The platform simulates an internal payment system where authenticated users can manage accounts and transfer funds between them.
 
-> **Important:** This is an educational/internal simulation. It does not process real money and does not implement real banking, KYC, or payment-network integrations.
-
----
-
-## Overview
-
-The system is designed around one core principle:
-
-> **PostgreSQL is the source of truth for all financial state.**
-
-Payment operations are performed inside PostgreSQL transactions, while Kafka is used for asynchronous event processing.
-
-The platform demonstrates several important backend reliability patterns:
-
-- Integer-based money representation
-- Database transactions
-- Row-level locking
-- Deterministic lock ordering
-- Idempotency
-- Double-entry ledger records
-- Transactional outbox
-- Asynchronous Kafka processing
-- At-least-once event processing with database deduplication
-- Redis-based distributed rate limiting
-- Request correlation IDs
-- Dockerized infrastructure
-- Automated backend tests
+> **Note:** This is an educational/internal simulation. It does not process real money and does not implement real banking, KYC, or external payment-network integrations.
 
 ---
 
@@ -38,14 +12,12 @@ The platform demonstrates several important backend reliability patterns:
 
 ```mermaid
 flowchart TD
-
     Client[React Frontend]
     Nginx[Nginx]
-    API[Node.js + Express API]
+    API[Node.js + Express]
 
     Redis[(Redis)]
     PostgreSQL[(PostgreSQL)]
-
     Outbox[(Outbox Events)]
     OutboxWorker[Outbox Worker]
     Kafka[(Kafka)]
@@ -66,61 +38,30 @@ flowchart TD
     Notifications --> API
 ```
 
-### High-level responsibilities
+### Component responsibilities
 
 | Component | Responsibility |
 |---|---|
 | React + Vite | User interface |
-| Nginx | Production serving of the frontend |
-| Node.js + Express | REST API and application logic |
-| PostgreSQL | Source of truth for users, accounts, transactions, ledger and notifications |
+| Nginx | Production frontend serving |
+| Node.js + Express | REST API and business logic |
+| PostgreSQL | Source of truth for financial state |
 | Redis | Distributed rate limiting |
 | Kafka | Asynchronous event transport |
-| Outbox Worker | Publishes committed database events to Kafka |
-| Notification Worker | Consumes Kafka events and creates notifications |
-| Docker Compose | Runs and connects the complete platform |
+| Outbox Worker | Publishes committed outbox events |
+| Notification Worker | Processes Kafka events and creates notifications |
+| Docker Compose | Runs the complete platform |
 | Jest | Backend unit and integration testing |
 
 ---
 
 # Core Design
 
-## Money Representation
-
-Money is never stored using floating-point values.
-
-Amounts are represented as integer **paise**:
-
-```text
-₹1    = 100 paise
-₹500  = 50000 paise
-```
-
-PostgreSQL stores monetary amounts using:
-
-```text
-BIGINT
-```
-
-This avoids floating-point precision problems during financial calculations.
-
-Example:
-
-```text
-₹500
-↓
-50000 paise
-↓
-BIGINT
-```
-
----
-
 ## PostgreSQL as the Source of Truth
 
-Financial state is maintained in PostgreSQL.
+All authoritative financial state is stored in PostgreSQL.
 
-The major database tables are:
+The main tables are:
 
 ```text
 users
@@ -133,15 +74,32 @@ notifications
 schema_migrations
 ```
 
-The system does not rely on Redis or Kafka as the authoritative source for account balances.
-
-Kafka is an event transport mechanism, while Redis is used for rate limiting.
+Kafka is used for asynchronous event delivery and Redis is used for rate limiting. Neither is treated as the source of truth for account balances.
 
 ---
 
-# Transfer Flow
+## Money Representation
 
-A transfer follows the application structure:
+Money is stored as integer **paise**, not floating-point values.
+
+```text
+₹1   = 100 paise
+₹500 = 50000 paise
+```
+
+PostgreSQL stores monetary values using:
+
+```text
+BIGINT
+```
+
+This avoids floating-point precision problems in financial calculations.
+
+---
+
+# Transfer Processing
+
+The backend follows a layered architecture:
 
 ```text
 Route
@@ -157,7 +115,7 @@ Repository
 PostgreSQL
 ```
 
-A simplified transfer flow is:
+A transfer request follows this flow:
 
 ```text
 Client
@@ -166,78 +124,43 @@ POST /api/transactions/transfer
   ↓
 Authentication
   ↓
-Rate Limiting
+Rate limiting
   ↓
 Validation
   ↓
 Transfer Service
   ↓
-PostgreSQL Transaction
+PostgreSQL transaction
 ```
 
 Inside the database transaction:
 
 ```text
-1. Resolve receiver account number
-2. Validate idempotency key
-3. Acquire account row locks
-4. Validate ownership/status/currency
-5. Check sufficient balance
-6. Create transaction
-7. Debit sender
-8. Credit receiver
-9. Create ledger entries
-10. Mark transaction SUCCESS
-11. Attach transaction to idempotency key
-12. Create outbox event
-13. Commit
+1. Validate the request
+2. Resolve the receiver account number
+3. Validate the idempotency key
+4. Lock the involved accounts
+5. Check ownership, status and currency
+6. Check sufficient balance
+7. Create the transaction
+8. Debit the sender
+9. Credit the receiver
+10. Create DEBIT and CREDIT ledger entries
+11. Mark the transaction SUCCESS
+12. Attach the transaction to the idempotency record
+13. Create the outbox event
+14. Commit
 ```
-
-Only after the database transaction commits does the event become eligible for asynchronous publishing.
 
 ---
 
-# Concurrency Control
+# Reliability Features
 
-Payment transfers can be executed concurrently.
+## Idempotency
 
-To prevent inconsistent balances and race conditions, the system uses PostgreSQL row-level locking.
+Transfers require an idempotency key.
 
-Accounts are locked using:
-
-```sql
-SELECT ... FOR UPDATE
-```
-
-The system also applies **deterministic lock ordering**.
-
-For example, if two accounts participate in a transfer:
-
-```text
-smaller account UUID
-      ↓
-larger account UUID
-```
-
-This means concurrent transfers acquire locks in a consistent order.
-
-The purpose is to reduce the possibility of deadlocks while ensuring that balance modifications are serialized correctly.
-
----
-
-# Idempotency
-
-Payment APIs must protect against duplicate requests.
-
-The transfer operation accepts an idempotency key.
-
-For example:
-
-```http
-Idempotency-Key: 8c7e2...
-```
-
-The server stores:
+The system stores:
 
 ```text
 idempotency key
@@ -247,48 +170,41 @@ transaction
 expiration
 ```
 
-The request hash is based on the internal identities of the sender and receiver and the requested amount.
+The request hash is generated from the internally resolved sender, receiver and amount.
 
-### Same request + same key
+### Same key + same request
 
-```text
-Request 1
-    ↓
-Transaction created
-
-Request 2
-same idempotency key
-same request
-    ↓
-Return the same transaction
-```
+The existing transaction is returned instead of creating a duplicate payment.
 
 ### Same key + different request
 
-```text
-Request A
-Idempotency-Key: abc
+The request is rejected with a conflict response.
 
-Request B
-Idempotency-Key: abc
-different amount/receiver
-```
-
-The second request is rejected.
-
-This prevents accidental duplicate payments caused by client retries.
+This protects the payment endpoint from duplicate client submissions and retries.
 
 ---
 
-# Ledger
+## Concurrency Control
 
-Successful transfers create ledger records representing both sides of the movement.
+The transfer operation uses PostgreSQL row-level locks:
 
-A transfer creates:
+```sql
+SELECT ... FOR UPDATE
+```
+
+When two accounts are involved, locks are acquired in deterministic order.
+
+This prevents competing transfers from modifying the same balances simultaneously without coordination and reduces deadlock risk.
+
+---
+
+## Double-Entry Ledger
+
+A successful transfer creates two ledger records:
 
 ```text
-DEBIT  → sender account
-CREDIT → receiver account
+Sender   → DEBIT
+Receiver → CREDIT
 ```
 
 For example:
@@ -307,189 +223,137 @@ This provides an auditable representation of the movement of funds.
 
 # Transactional Outbox
 
-A major reliability problem in distributed systems is the dual-write problem.
+The payment request must not depend on Kafka being available at the exact moment the database transaction commits.
 
-Consider:
+Without an outbox, a failure between:
 
 ```text
-Database transaction
-        +
+database commit
+      ↓
 Kafka publish
 ```
 
-If the database commits but Kafka publishing fails, the payment would succeed but the event could be lost.
+could result in a successful payment whose event was never published.
 
-This project solves that using the **Transactional Outbox Pattern**.
-
-Instead of publishing to Kafka directly from the request transaction:
+The system instead writes the transaction and the outbox event in the **same PostgreSQL transaction**:
 
 ```text
 PostgreSQL transaction
-        ↓
-transaction state
-        +
-outbox event
+        │
+        ├── transaction state
+        │
+        └── outbox event
 ```
 
-Both are committed atomically.
+Both commit together.
 
-Therefore:
-
-```text
-Payment SUCCESS
-      +
-Outbox Event
-```
-
-either commit together or roll back together.
-
-The outbox worker later publishes the event to Kafka.
-
----
-
-# Outbox Worker
-
-The outbox worker continuously looks for unpublished events.
-
-The lifecycle is:
-
-```text
-PENDING
-   ↓
-PROCESSING
-   ↓
-PUBLISHED
-```
-
-If publishing fails, the event can remain available for later processing.
-
-Important fields include:
-
-```text
-status
-attempts
-available_at
-locked_at
-published_at
-last_error
-```
-
-This keeps asynchronous event publication separate from the user-facing payment request.
+The outbox worker publishes the event asynchronously after the transaction has committed.
 
 ---
 
 # Kafka
 
-Kafka is used as the asynchronous event transport layer.
+Kafka is used for asynchronous transaction events.
 
-The platform uses:
+Current topic:
 
 ```text
-Topic:
 transaction-events
 ```
 
-The current development setup uses:
+The development configuration uses:
 
 ```text
-1 partition
 1 broker
+1 partition
 1 ISR
 ```
 
-Kafka is configured in **KRaft mode**, so the project does not depend on ZooKeeper.
+Kafka runs in **KRaft mode**, so ZooKeeper is not required.
 
-### Kafka listener setup
+### Kafka listeners
 
-Inside Docker:
+Containers communicate with Kafka using:
 
 ```text
 payment-kafka:19092
 ```
 
-From the Windows host:
+Host-side tools can connect using:
 
 ```text
 localhost:9092
 ```
 
-This distinction is important because containers communicate using Docker service names, while tools running directly on the host use `localhost`.
+The separate listeners prevent Docker containers from incorrectly trying to reach Kafka through their own `localhost`.
 
 ---
 
 # Notification Processing
 
-After a transfer succeeds:
+After a successful payment:
 
 ```text
 PostgreSQL
-   ↓
-outbox event
-   ↓
+    ↓
+Outbox Event
+    ↓
 Outbox Worker
-   ↓
+    ↓
 Kafka
-   ↓
+    ↓
 Notification Worker
-   ↓
+    ↓
 notifications table
-   ↓
+    ↓
 Frontend
 ```
 
-The notification worker belongs to the Kafka consumer group:
+The notification worker uses the Kafka consumer group:
 
 ```text
 notification-service
 ```
 
-Kafka offsets are committed **after successful processing**.
+Kafka offsets are committed after successful processing.
 
-This gives the system an at-least-once processing model.
+This provides an **at-least-once processing model**.
 
 ---
 
-# Duplicate Notification Protection
+# Notification Deduplication
 
-At-least-once processing means an event can potentially be delivered more than once.
+Kafka consumers can receive an event more than once.
 
-To make notification processing safe, the database contains a uniqueness constraint:
+The notifications table therefore enforces:
 
 ```text
 UNIQUE(event_id, user_id)
 ```
 
-The consumer uses:
+The notification worker uses:
 
 ```sql
 ON CONFLICT DO NOTHING
 ```
 
-Therefore:
+So a redelivered Kafka event does not create a duplicate notification.
+
+The resulting model is:
 
 ```text
-Kafka Event
-   ↓
-Notification inserted
-   ↓
-Consumer crashes before offset commit
-   ↓
-Kafka redelivers event
-   ↓
-Database sees duplicate
-   ↓
-ON CONFLICT DO NOTHING
+At-least-once delivery
+        +
+Database deduplication
+        ↓
+Safe notification processing
 ```
-
-The result is no duplicate notification.
 
 ---
 
 # Redis Rate Limiting
 
-Redis is used for distributed request rate limiting.
-
-The transfer route uses a **Lua-based token bucket**.
+The transfer route uses a Redis-based token bucket implemented with Lua.
 
 Current configuration:
 
@@ -498,7 +362,7 @@ Capacity: 10 requests
 Refill rate: 2 requests/second
 ```
 
-The bucket is keyed by the authenticated user.
+The rate limit is keyed by the authenticated user.
 
 Relevant response headers include:
 
@@ -508,76 +372,13 @@ X-RateLimit-Remaining
 Retry-After
 ```
 
-Using Redis rather than process-local memory allows rate-limit state to be shared across multiple backend instances.
-
----
-
-# Authentication
-
-The backend uses JWT-based authentication.
-
-Authenticated requests provide the user's identity to the backend.
-
-The user identity is then used for:
-
-- Authorization
-- Account ownership checks
-- Idempotency ownership
-- Rate-limit keys
-- User-specific data access
-
-The backend does not trust a client-supplied receiver UUID during transfer processing.
-
-Instead:
-
-```text
-Receiver account number
-        ↓
-Backend lookup
-        ↓
-Internal receiver UUID
-```
-
-This keeps internal database identifiers separate from the external account-number interface.
-
----
-
-# Request IDs and Logging
-
-The backend uses request correlation IDs to make requests easier to trace across logs.
-
-This is useful when following a flow such as:
-
-```text
-HTTP request
-   ↓
-transaction
-   ↓
-outbox
-   ↓
-Kafka event
-   ↓
-notification processing
-```
-
-Workers emit structured JSON logs containing identifiers such as:
-
-```text
-eventId
-transactionId
-topic
-partition
-offset
-timestamp
-```
-
-This helps connect an event across different components.
+Using Redis allows rate-limit state to be shared across multiple backend instances instead of keeping it only in process memory.
 
 ---
 
 # Database Migrations
 
-Database schema changes are managed through ordered SQL migration files.
+Database schema changes are managed through ordered SQL migrations.
 
 Current migrations:
 
@@ -586,15 +387,76 @@ Current migrations:
 002_reconcile_authoritative_schema.sql
 ```
 
-The migration runner provides:
+The migration runner supports:
 
-- Ordered execution
+- Ordered migration execution
 - SHA-256 checksums
 - `schema_migrations` tracking
 - PostgreSQL advisory locking
 - Transactional migration execution
 
-Migration `001_initial_schema.sql` should not be modified after it has been applied.
+`001_initial_schema.sql` should not be modified after it has been applied.
+
+---
+
+# Authentication and Authorization
+
+The backend uses JWT-based authentication.
+
+The authenticated user identity is used for:
+
+- Authorization
+- Account ownership checks
+- Idempotency ownership
+- Rate-limit keys
+- User-specific data access
+
+The transfer API accepts a receiver **account number** rather than exposing the internal receiver UUID as the public identifier.
+
+The backend resolves the account number internally before performing the transfer.
+
+---
+
+# Frontend
+
+The frontend is built with:
+
+```text
+React
+TypeScript
+Vite
+React Router
+TanStack Query
+```
+
+Production frontend serving uses:
+
+```text
+Nginx
+```
+
+The Docker image uses a multi-stage build:
+
+```text
+Node.js
+   ↓
+Vite production build
+   ↓
+Nginx
+```
+
+Nginx is configured for React SPA routing so routes such as:
+
+```text
+/dashboard
+/accounts
+/transactions
+/notifications
+```
+
+continue to work after a browser refresh.
+
+User-specific React Query caches are scoped to the authenticated user, and query data is cleared on logout to prevent data from a previous session from being displayed after switching accounts.
 
 ---
 
@@ -610,8 +472,8 @@ Migration `001_initial_schema.sql` should not be modified after it has been appl
 │   ├── services/
 │   ├── workers/
 │   ├── scripts/
-│   ├── tests/
 │   ├── migrations/
+│   ├── tests/
 │   ├── Dockerfile
 │   └── package.json
 │
@@ -630,9 +492,40 @@ Migration `001_initial_schema.sql` should not be modified after it has been appl
 
 ---
 
-# Docker Architecture
+# Tech Stack
 
-The entire application infrastructure is managed using Docker Compose.
+### Frontend
+
+- React
+- TypeScript
+- Vite
+- React Router
+- TanStack Query
+- Nginx
+
+### Backend
+
+- Node.js
+- Express
+- JavaScript
+
+### Infrastructure
+
+- PostgreSQL
+- Redis
+- Apache Kafka
+- Docker
+- Docker Compose
+
+### Testing
+
+- Jest
+
+---
+
+# Docker Setup
+
+The entire platform is managed by Docker Compose.
 
 Services:
 
@@ -647,7 +540,7 @@ outbox-worker
 notification-worker
 ```
 
-Compose also manages the application network:
+The services communicate over the Compose-managed network:
 
 ```text
 paymentsystem_payment-network
@@ -661,21 +554,21 @@ paymentsystem_redis_data
 payment-kafka-data
 ```
 
-This means Redis and Kafka no longer need to be started manually as separate Docker containers.
+This means PostgreSQL, Redis and Kafka no longer need to be started manually as separate containers.
 
 ---
 
 # Ports
 
-| Component | Host Port | Container Port |
+| Component | Host | Container |
 |---|---:|---:|
-| Frontend / Nginx | 8080 | 80 |
-| Backend API | 3000 | 3000 |
-| PostgreSQL | 5433 | 5432 |
-| Redis | 6379 | 6379 |
-| Kafka | 9092 | 9092 |
+| Frontend / Nginx | `8080` | `80` |
+| Backend API | `3000` | `3000` |
+| PostgreSQL | `5433` | `5432` |
+| Redis | `6379` | `6379` |
+| Kafka | `9092` | `9092` |
 
-Kafka's internal Docker listener is:
+Internal Kafka communication uses:
 
 ```text
 payment-kafka:19092
@@ -683,17 +576,23 @@ payment-kafka:19092
 
 ---
 
-# Environment Configuration
+# Environment Variables
 
-Create the local environment file from the example:
+Create a local `.env` file from `.env.example`.
 
-```bash
+### Windows CMD
+
+```cmd
 copy .env.example .env
 ```
 
-or create `.env` manually.
+### macOS / Linux
 
-A development configuration looks like:
+```bash
+cp .env.example .env
+```
+
+Example:
 
 ```env
 DB_NAME=payment_system
@@ -707,7 +606,7 @@ REDIS_URL=redis://payment-redis:6379
 KAFKA_BROKERS=payment-kafka:19092
 ```
 
-> `.env` should remain local and must not be committed to Git.
+Do not commit `.env` or local database backups.
 
 ---
 
@@ -720,20 +619,11 @@ Install:
 - Docker Desktop
 - Git
 
-The Docker setup provides:
-
-- PostgreSQL
-- Redis
-- Kafka
-- Backend
-- Frontend
-- Workers
-
-So the complete platform can be run without separately installing PostgreSQL, Redis, or Kafka on the host.
+The application infrastructure is provided through Docker Compose, so PostgreSQL, Redis and Kafka do not need to be installed separately on the host.
 
 ---
 
-## Start the complete platform
+## Start the platform
 
 From the project root:
 
@@ -741,7 +631,7 @@ From the project root:
 docker compose up -d
 ```
 
-For the first build, or after Dockerfile/dependency changes:
+For the first build or after changing Dockerfiles/dependencies:
 
 ```bash
 docker compose up -d --build
@@ -755,7 +645,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Expected long-running services:
+The long-running services are:
 
 ```text
 payment-postgres
@@ -767,11 +657,13 @@ payment-outbox-worker
 payment-notification-worker
 ```
 
-The migration service is a one-shot container and is expected to exit successfully:
+The migration container:
 
 ```text
 payment-migrate
 ```
+
+is a one-shot service and is expected to exit successfully after migrations complete.
 
 ---
 
@@ -789,29 +681,11 @@ Backend:
 http://localhost:3000
 ```
 
-PostgreSQL:
-
-```text
-localhost:5433
-```
-
-Redis:
-
-```text
-localhost:6379
-```
-
-Kafka:
-
-```text
-localhost:9092
-```
-
 ---
 
 # Stopping the Platform
 
-Stop the running services without removing volumes:
+Stop the running containers:
 
 ```bash
 docker compose stop
@@ -823,25 +697,31 @@ Start them again:
 docker compose up -d
 ```
 
-To remove the containers and network while keeping persistent volumes:
+Remove the containers and Compose network while keeping persistent volumes:
 
 ```bash
 docker compose down
 ```
 
-> Avoid `docker compose down -v` unless you intentionally want to delete the Compose-managed database, Redis, and Kafka volumes.
+Avoid:
+
+```bash
+docker compose down -v
+```
+
+unless you intentionally want to remove the PostgreSQL, Redis and Kafka data volumes.
 
 ---
 
 # Useful Docker Commands
 
-### View all services
+### View service status
 
 ```bash
 docker compose ps
 ```
 
-### Follow all logs
+### View all logs
 
 ```bash
 docker compose logs -f
@@ -877,131 +757,123 @@ docker compose logs -f kafka
 docker compose logs -f redis
 ```
 
-### PostgreSQL logs
-
-```bash
-docker compose logs -f postgres
-```
-
 ---
 
 # Testing
 
 The backend uses Jest for unit and integration testing.
 
-Run the test suite from the backend directory:
+From the backend directory:
 
 ```bash
 cd backend
 npm test
 ```
 
-The test suite covers important reliability behavior including:
+The test suite covers reliability-related behavior including:
 
-- Transaction service logic
-- Concurrency
+- Transfer service logic
 - Idempotency
+- Concurrent transfers
 - Outbox atomicity
-- Failure scenarios
 - Repository behavior
+- Failure scenarios
 
-The project has previously been validated with backend unit/integration tests covering the core payment reliability paths.
+The system has also been manually verified through the Dockerized end-to-end flow:
+
+```text
+Transfer
+   ↓
+PostgreSQL
+   ↓
+Outbox
+   ↓
+Kafka
+   ↓
+Notification Worker
+   ↓
+Notifications
+   ↓
+Frontend
+```
 
 ---
 
 # Reliability Scenarios
 
-The system is designed around several important failure scenarios.
-
-## Duplicate payment request
+## Duplicate transfer request
 
 ```text
 Client retry
-   ↓
+    ↓
 Same Idempotency-Key
-   ↓
-Same request hash
-   ↓
-Return existing transaction
+    ↓
+Same request
+    ↓
+Existing transaction returned
 ```
 
-No duplicate transaction is created.
-
----
-
-## Same idempotency key with a different request
-
-```text
-Existing key
-     +
-Different request hash
-     ↓
-409 Conflict
-```
-
-This prevents accidental key reuse for a different operation.
+No second payment transaction is created.
 
 ---
 
 ## Concurrent transfers
 
-Two requests attempt to modify overlapping accounts.
-
-The system uses:
-
 ```text
+Concurrent requests
+        ↓
 SELECT FOR UPDATE
-+
-deterministic lock ordering
-+
-database transaction
+        +
+Deterministic lock ordering
+        ↓
+Safe balance updates
 ```
-
-to maintain correct balances.
 
 ---
 
-## Database commit succeeds but Kafka is unavailable
-
-The payment transaction still commits together with an outbox event.
-
-The Kafka publication can happen later.
+## Database succeeds while Kafka is unavailable
 
 ```text
-Payment
-  ↓
-DB transaction commits
-  +
+Payment transaction
+       +
 Outbox event
-  ↓
+       ↓
+PostgreSQL commit
+       ↓
 Kafka temporarily unavailable
-  ↓
-Outbox event remains available
-  ↓
-Worker retries publication
+       ↓
+Outbox remains available
+       ↓
+Worker publishes later
 ```
 
-The payment does not depend on synchronous Kafka availability.
+The payment request does not require Kafka to be available synchronously.
 
 ---
 
-## Kafka event is delivered more than once
-
-The notification worker may see the same event again.
-
-The database constraint:
+## Kafka redelivery
 
 ```text
+Kafka event
+    ↓
+Notification inserted
+    ↓
+Consumer crashes before offset commit
+    ↓
+Kafka redelivers event
+    ↓
 UNIQUE(event_id, user_id)
+    ↓
+ON CONFLICT DO NOTHING
 ```
 
-prevents duplicate notifications.
+The notification is not duplicated.
 
 ---
 
 # Design Trade-offs
 
-This project intentionally avoids unnecessary infrastructure.
+The project intentionally avoids infrastructure that is not necessary for its scope.
 
 It does not currently use:
 
@@ -1010,241 +882,71 @@ It does not currently use:
 - Kafka Streams
 - Schema Registry
 - Distributed databases
-- Kafka clusters with multiple brokers
-- Complex retry frameworks
+- Multiple Kafka brokers
 - Large numbers of microservices
+- Complex retry frameworks
 
-The goal is to demonstrate **correct engineering decisions and reliability patterns without introducing infrastructure that is unnecessary for the scope of the project**.
+The goal is to demonstrate correctness and reliability patterns without introducing unnecessary operational complexity.
 
-For a single-node educational environment, the current Kafka configuration uses one broker and one partition.
-
-In a production deployment, higher availability would require additional Kafka brokers, replication, infrastructure redundancy, secrets management, observability, and deployment automation.
-
----
-
-# Frontend
-
-The frontend is built using:
-
-```text
-React
-Vite
-Nginx
-```
-
-The production Docker image uses a multi-stage build:
-
-```text
-Node.js build stage
-       ↓
-Vite production build
-       ↓
-Nginx runtime
-```
-
-Nginx is configured to support React client-side routing:
-
-```nginx
-try_files $uri $uri/ /index.html;
-```
-
-This allows routes such as:
-
-```text
-/dashboard
-/accounts
-/transactions
-/notifications
-```
-
-to work correctly after a browser refresh.
+The current Kafka setup is a single-broker development environment. Production high availability would require replication, multiple brokers, redundant infrastructure, stronger secret management, observability, and deployment automation.
 
 ---
 
-# Frontend Session Data Isolation
+# Scope and Limitations
 
-Authenticated frontend data is scoped to the current user.
+This project is intentionally a simulated internal payment platform.
 
-React Query keys include the authenticated user identity for user-specific data such as:
+It does not provide:
 
-```text
-accounts
-notifications
-transactions
-```
+- Real banking integration
+- Real money movement
+- KYC/AML workflows
+- External payment gateways
+- Card processing
+- UPI integration
+- Production-grade identity infrastructure
 
-The application also clears cached query data when the user logs out.
-
-This prevents data from the previous authenticated session from being displayed after switching users.
-
----
-
-# API Architecture
-
-The backend follows a layered structure:
-
-```text
-Route
- ↓
-Middleware
- ↓
-Controller
- ↓
-Service
- ↓
-Repository
- ↓
-PostgreSQL
-```
-
-### Route
-
-Defines the HTTP endpoint.
-
-### Middleware
-
-Handles cross-cutting concerns such as:
-
-- Authentication
-- Validation
-- Rate limiting
-- Request IDs
-
-### Controller
-
-Handles HTTP-specific concerns and responses.
-
-### Service
-
-Contains business logic and reliability rules.
-
-### Repository
-
-Handles database interaction.
-
-This separation keeps business logic independent from the HTTP layer and database implementation details.
-
----
-
-# Security and Data Handling
-
-The project includes:
-
-- JWT-based authentication
-- Authenticated-user authorization checks
-- Account ownership checks
-- Idempotency protection
-- Rate limiting
-- Environment-based secrets
-- `.env` excluded from Git
-- Database backups excluded from Git
-
-This is a development/educational platform and should not be used to process real financial funds.
-
----
-
-# Development Notes
-
-The project is intentionally kept in JavaScript/TypeScript for the application stack.
-
-The backend uses JavaScript with:
-
-```text
-Node.js
-Express
-PostgreSQL
-Redis
-Kafka
-Jest
-```
-
-The frontend uses:
-
-```text
-React
-Vite
-TypeScript
-Nginx
-```
-
-Infrastructure is managed through:
-
-```text
-Docker
-Docker Compose
-```
+Funds are intended to be created only through development/manual mechanisms.
 
 ---
 
 # Future Improvements
 
-Potential future improvements, depending on project requirements, include:
+Potential future improvements include:
 
-- Authentication token rotation
-- Refresh-token support
-- Better secret management
+- Refresh-token authentication
 - API documentation with OpenAPI
-- More extensive observability
 - Metrics and tracing
-- Dead-letter handling for permanently failing events
+- Dead-letter handling
 - Configurable retry/backoff policies
-- Multiple Kafka brokers for high availability
 - CI/CD pipeline
+- Production secret management
+- Multi-broker Kafka deployment
 - Production deployment automation
+- Expanded observability
 
-These are intentionally not part of the current implementation because the project's goal is to demonstrate the core reliability architecture without unnecessary complexity.
-
----
-
-# Why This Project
-
-This project demonstrates practical backend and distributed-systems concepts that are important in real software engineering environments:
-
-- Database transaction correctness
-- Concurrency control
-- Idempotent APIs
-- Event-driven architecture
-- Transactional outbox
-- At-least-once processing
-- Database-backed deduplication
-- Distributed rate limiting
-- Layered backend architecture
-- Containerized infrastructure
-- Failure-aware system design
-
-The primary goal is to demonstrate not only that the application works, but also **why the architecture behaves correctly under retries, concurrency, service failures, and asynchronous processing.**
+These are intentionally outside the current scope.
 
 ---
 
-# Tech Stack
+# Key Engineering Concepts Demonstrated
 
-### Frontend
+This project focuses on practical backend and distributed-systems concepts:
 
-- React
-- Vite
-- TypeScript
-- Nginx
+```text
+Database Transactions
+Concurrency Control
+Row-Level Locking
+Idempotent APIs
+Double-Entry Ledger
+Transactional Outbox
+Event-Driven Architecture
+At-Least-Once Processing
+Database Deduplication
+Distributed Rate Limiting
+Layered Backend Architecture
+Dockerized Infrastructure
+Failure-Aware Design
+```
 
-### Backend
-
-- Node.js
-- Express
-- JavaScript
-
-### Data and Infrastructure
-
-- PostgreSQL
-- Redis
-- Apache Kafka
-- Docker
-- Docker Compose
-
-### Testing
-
-- Jest
-
----
-
-# License
-
-This project is intended for educational and portfolio purposes.
+The main goal is not simply to demonstrate that the application works, but to demonstrate **why it remains correct when requests are retried, operations run concurrently, and asynchronous components temporarily fail.**
