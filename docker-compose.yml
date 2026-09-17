@@ -80,7 +80,7 @@ services:
       retries: 15
       start_period: 20s
 
-      restart: unless-stopped
+    restart: unless-stopped
 
   migrate:
     build:

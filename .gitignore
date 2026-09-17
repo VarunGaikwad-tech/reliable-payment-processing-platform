@@ -11,9 +11,6 @@ frontend/.env
 # Logs
 *.log
 
-# Lovable project metadata
-frontend/.lovable/
-
 .env
 
 # Local database backups
