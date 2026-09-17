@@ -15,3 +15,5 @@ frontend/.env
 
 # Local database backups
 backup/
+
+/backend/certs/ca.pem

@@ -27,6 +27,13 @@ const config = {
     brokers: (process.env.KAFKA_BROKERS || "localhost:9092")
       .split(",")
       .map((broker) => broker.trim()),
+
+    username: process.env.KAFKA_USERNAME,
+    password: process.env.KAFKA_PASSWORD,
+    saslMechanism: process.env.KAFKA_SASL_MECHANISM || "scram-sha-256",
+    ssl: process.env.KAFKA_SSL === "true",
+    caPath: process.env.KAFKA_CA_PATH,
+    caCert: process.env.KAFKA_CA_CERT,
   },
 };
 
