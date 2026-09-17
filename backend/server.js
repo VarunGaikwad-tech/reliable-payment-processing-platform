@@ -16,7 +16,7 @@ const startServer = async () => {
     await redisClient.connect();
     logger.info("redis.connected");
 
-    app.listen(config.port, () => {
+    app.listen(config.port, "0.0.0.0", () => {
       logger.info("http.server.started", { port: config.port });
     });
   } catch (error) {
