@@ -11,6 +11,10 @@ const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
 
+app.get("/healthz", (req, res) => {
+  res.json({ status: "ok" });
+});
+
 app.use(requestId);
 app.use(cors);
 app.use(express.json());

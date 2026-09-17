@@ -1,7 +1,8 @@
 const allowedOrigins = [
   "http://localhost:8080",
   "http://localhost:5173",
-];
+  process.env.FRONTEND_URL,
+].filter(Boolean);
 
 const cors = (req, res, next) => {
   const origin = req.headers.origin;
