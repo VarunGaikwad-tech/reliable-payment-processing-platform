@@ -399,7 +399,7 @@ const getTransactionHistory = async (
   }
 
   if (!isUuid(accountId)) {
-    throw new AppError("Invalid account ID", 400);
+    throw new AppError("Invalid sender account ID", 400);
   }
 
   if (!Number.isSafeInteger(page) || page < 1) {

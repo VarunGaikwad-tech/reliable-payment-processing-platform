@@ -7,7 +7,7 @@ describe("Transfer concurrency integration", () => {
   let userId;
   let senderAccountId;
   let receiverAccountId;
-
+  let receiverAccountNumber;
   const transferAmount = 10000; // ₹100 in paise
   const startingBalance = 100000; // ₹1000 in paise
   const idempotencyKey = `concurrent-test-${crypto.randomUUID()}`;
@@ -16,7 +16,7 @@ describe("Transfer concurrency integration", () => {
     userId = crypto.randomUUID();
     senderAccountId = crypto.randomUUID();
     receiverAccountId = crypto.randomUUID();
-
+    receiverAccountNumber = `TEST${Date.now()}02`;
     const client = await pool.connect();
 
     try {
@@ -79,7 +79,7 @@ describe("Transfer concurrency integration", () => {
         [
           receiverAccountId,
           userId,
-          `TEST${Date.now()}02`,
+          receiverAccountNumber,
           0,
         ]
       );
@@ -174,14 +174,14 @@ describe("Transfer concurrency integration", () => {
       transfer(
         userId,
         senderAccountId,
-        receiverAccountId,
+        receiverAccountNumber,
         transferAmount,
         idempotencyKey
       ),
       transfer(
         userId,
         senderAccountId,
-        receiverAccountId,
+        receiverAccountNumber,
         transferAmount,
         idempotencyKey
       ),
@@ -321,14 +321,14 @@ describe("Transfer concurrency integration", () => {
       transfer(
         userId,
         senderAccountId,
-        receiverAccountId,
+        receiverAccountNumber,
         competingAmount,
         competingKey1
       ),
       transfer(
         userId,
         senderAccountId,
-        receiverAccountId,
+        receiverAccountNumber,
         competingAmount,
         competingKey2
       ),

@@ -36,18 +36,23 @@ describe("Transaction Service - Idempotency", () => {
   const userId = "11111111-1111-4111-8111-111111111111";
   const fromAccountId = "22222222-2222-4222-8222-222222222222";
   const toAccountId = "33333333-3333-4333-8333-333333333333";
+  const toAccountNumber = "407997690543"; 
   const amount = 10000;
   const idempotencyKey = "test-idempotency-key";
 
   beforeEach(() => {
     jest.clearAllMocks();
+
+    accountRepository.findByAccountNumber.mockResolvedValue({
+      id: toAccountId,
+    });
   });
 
   test("returns existing transaction for an identical idempotent request", async () => {
     const existingTransaction = {
       id: "transaction-123",
       sender_account_id: fromAccountId,
-      receiver_account_id: toAccountId,
+      receiver_account_id: toAccountNumber,
       amount: "10000",
       status: "SUCCESS",
     };
@@ -68,7 +73,7 @@ describe("Transaction Service - Idempotency", () => {
     const result = await transfer(
       userId,
       fromAccountId,
-      toAccountId,
+      toAccountNumber,
       amount,
       idempotencyKey
     );
@@ -104,7 +109,7 @@ describe("Transaction Service - Idempotency", () => {
       transfer(
         userId,
         fromAccountId,
-        toAccountId,
+        toAccountNumber,
         amount,
         idempotencyKey
       )
@@ -135,7 +140,7 @@ describe("Transaction Service - Idempotency", () => {
       transfer(
         userId,
         fromAccountId,
-        toAccountId,
+        toAccountNumber,
         amount,
         idempotencyKey
       )
@@ -159,7 +164,7 @@ describe("Transaction Service - Idempotency", () => {
       transfer(
         userId,
         fromAccountId,
-        toAccountId,
+        toAccountNumber,
         amount,
         idempotencyKey
       )
@@ -177,7 +182,7 @@ describe("Transaction Service - Idempotency", () => {
       transfer(
         userId,
         fromAccountId,
-        toAccountId,
+        toAccountNumber,
         amount,
         idempotencyKey
       )
@@ -186,21 +191,36 @@ describe("Transaction Service - Idempotency", () => {
       statusCode: 500,
     });
   });
-
   test("rejects malformed account IDs before opening a transaction", async () => {
     await expect(
-      transfer(userId, "not-a-uuid", toAccountId, amount, idempotencyKey)
+      transfer(
+        userId,
+        "not-a-uuid",
+        toAccountNumber,
+        amount,
+        idempotencyKey
+      )
     ).rejects.toMatchObject({
-      message: "Invalid account ID",
+      message: "Invalid sender account ID",
       statusCode: 400,
     });
 
     expect(withTransaction).not.toHaveBeenCalled();
   });
+  // test("rejects malformed account IDs before opening a transaction", async () => {
+  //   await expect(
+  //     transfer(userId, "not-a-uuid", toAccountNumber, amount, idempotencyKey)
+  //   ).rejects.toMatchObject({
+  //     message: "Invalid sender account ID",
+  //     statusCode: 400,
+  //   });
+
+  //   expect(withTransaction).not.toHaveBeenCalled();
+  // });
 
   test("rejects unsafe or non-integer paise amounts", async () => {
     await expect(
-      transfer(userId, fromAccountId, toAccountId, Number.MAX_SAFE_INTEGER + 1, idempotencyKey)
+      transfer(userId, fromAccountId, toAccountNumber, Number.MAX_SAFE_INTEGER + 1, idempotencyKey)
     ).rejects.toMatchObject({
       message: "Amount must be a positive integer in paise",
       statusCode: 400,

@@ -20,7 +20,7 @@ describe("Outbox atomicity", () => {
   let userId;
   let senderAccountId;
   let receiverAccountId;
-
+  let receiverAccountNumber;
   const startingBalance = 100000;
   const transferAmount = 10000;
   const idempotencyKey = `outbox-failure-${crypto.randomUUID()}`;
@@ -29,6 +29,7 @@ describe("Outbox atomicity", () => {
     userId = crypto.randomUUID();
     senderAccountId = crypto.randomUUID();
     receiverAccountId = crypto.randomUUID();
+    receiverAccountNumber = `OUTBOX${Date.now()}2`;
 
     const client = await pool.connect();
 
@@ -89,7 +90,7 @@ describe("Outbox atomicity", () => {
         [
           receiverAccountId,
           userId,
-          `OUTBOX${Date.now()}2`,
+          receiverAccountNumber,
         ]
       );
 
@@ -144,19 +145,6 @@ describe("Outbox atomicity", () => {
       
       await client.query(
         `
-        DELETE FROM outbox_events
-        WHERE aggregate_id IN (
-          SELECT id
-          FROM transactions
-          WHERE sender_account_id = $1
-            OR receiver_account_id = $1
-        )
-        `,
-        [senderAccountId]
-      );
-
-      await client.query(
-        `
         DELETE FROM transactions
         WHERE sender_account_id = $1
            OR receiver_account_id = $1
@@ -196,7 +184,7 @@ describe("Outbox atomicity", () => {
       transfer(
         userId,
         senderAccountId,
-        receiverAccountId,
+        receiverAccountNumber,
         transferAmount,
         idempotencyKey
       )
