@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { onUnauthorized, tokenStore } from "@/services/api-client";
 import { authService, type LoginInput, type RegisterInput } from "@/services/auth-service";
 import type { AuthUser } from "@/types/api";
@@ -15,6 +16,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -52,9 +55,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     authService.signOut();
+
+    queryClient.removeQueries();
+
     setUser(null);
     setIsAuthenticated(false);
-  }, []);
+  }, [queryClient]);
 
   const value = useMemo(
     () => ({ user, isAuthenticated, loading, login, register, logout }),
