@@ -12,6 +12,9 @@ interface RawTransaction {
   transactionId?: string;
   transaction_id?: string;
 
+  sender_account_id?: string;
+  receiver_account_id?: string;
+
   fromAccountId?: string;
   from_account_id?: string;
   toAccountId?: string;
@@ -43,9 +46,18 @@ export function normaliseTransaction(raw: RawTransaction): Transaction {
   return {
     id: String(raw.id ?? raw.transactionId ?? raw.transaction_id ?? ""),
 
-    fromAccountId: raw.fromAccountId ?? raw.from_account_id,
+    // fromAccountId: raw.fromAccountId ?? raw.from_account_id,
 
-    toAccountId: raw.toAccountId ?? raw.to_account_id,
+    // toAccountId: raw.toAccountId ?? raw.to_account_id,
+    fromAccountId:
+      raw.fromAccountId ??
+      raw.from_account_id ??
+      raw.sender_account_id,
+
+    toAccountId:
+      raw.toAccountId ??
+      raw.to_account_id ??
+      raw.receiver_account_id,
 
     amount: raw.amount ?? "0",
 
@@ -88,19 +100,6 @@ export function normaliseTransaction(raw: RawTransaction): Transaction {
     completedAt: raw.completedAt ?? raw.completed_at ?? null,
   };
 }
-// export function normaliseTransaction(raw: RawTransaction): Transaction {
-//   return {
-//     id: String(raw.id ?? raw.transactionId ?? raw.transaction_id ?? ""),
-//     fromAccountId: raw.fromAccountId ?? raw.from_account_id,
-//     toAccountId: raw.toAccountId ?? raw.to_account_id,
-//     amount: raw.amount ?? "0",
-//     currency: raw.currency ?? "INR",
-//     status: raw.status ?? "unknown",
-//     type: raw.type,
-//     createdAt: raw.createdAt ?? raw.created_at,
-//     completedAt: raw.completedAt ?? raw.completed_at ?? null,
-//   };
-// }
 
 function readPagination(payload: unknown, fallback: Pagination): Pagination {
   if (payload && typeof payload === "object") {
@@ -191,15 +190,5 @@ export const transactionsService = {
         : payload;
 
     return normaliseTransaction(transaction ?? {});
-    // const payload = await apiRequest<RawTransaction>("/transactions/transfer", {
-    //   method: "POST",
-    //   body: {
-    //     fromAccountId: input.fromAccountId,
-    //     toAccountNumber: input.toAccountNumber,
-    //     amount,
-    //   },
-    //   headers: { "Idempotency-Key": input.idempotencyKey },
-    // });
-    // return normaliseTransaction(payload ?? {});
   },
 };
