@@ -3,7 +3,8 @@
 A production-style payment processing platform built to demonstrate backend engineering, distributed systems, database correctness, concurrency control, asynchronous processing, and reliability patterns.
 
 The platform simulates an internal payment system where authenticated users can manage accounts and transfer funds between them.
-About the deployment CI/CD pipeline verified through GitHub Actions, Vercel, and Render.
+
+The platform is deployed using Vercel for the frontend, Render for the backend, and Aiven for managed PostgreSQL, Valkey, and Kafka infrastructure. CI is implemented with GitHub Actions and production deployment is automated through the connected Git providers.
 
 > **Note:** This is an educational/internal simulation. It does not process real money and does not implement real banking, KYC, or external payment-network integrations.
 
@@ -524,6 +525,204 @@ User-specific React Query caches are scoped to the authenticated user, and query
 
 ---
 
+# Production Deployment
+
+The application is deployed using managed cloud services while keeping the same logical application architecture used in local development.
+
+```text
+                        GitHub
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+             ▼                           ▼
+          Vercel                       Render
+        Frontend                    Backend API
+             │                           │
+             │                    ┌──────┴──────┐
+             │                    │   Workers   │
+             │                    │             │
+             │                    │ Outbox      │
+             │                    │ Notification│
+             │                    └──────┬──────┘
+             │                           │
+             └───────────────┬───────────┘
+                             │
+                    Managed infrastructure
+                    ┌────────┼────────┐
+                    ▼        ▼        ▼
+                PostgreSQL Valkey    Kafka
+                    Aiven    Aiven    Aiven
+```
+
+### Production components
+
+| Service | Provider | Purpose |
+|---|---|---|
+| Frontend | Vercel | Hosts the production React/Vite application |
+| Backend | Render | Runs the Node.js + Express API |
+| PostgreSQL | Aiven | Authoritative financial database |
+| Valkey | Aiven | Distributed rate-limiter state |
+| Kafka | Aiven | Asynchronous transaction event transport |
+
+The backend uses environment variables for production database, Valkey, Kafka, JWT, and CORS configuration. Secrets and connection credentials are stored in the deployment platforms rather than committed to the repository.
+
+The production backend exposes a health endpoint at:
+
+```text
+GET /healthz
+```
+
+Render uses the health endpoint to verify the running backend instance. The frontend uses the deployed Render API base URL for production API requests.
+
+The local Docker Compose deployment and the cloud deployment use the same logical flow:
+
+```text
+Frontend
+   ↓
+Backend API
+   ↓
+PostgreSQL
+   ↓
+Outbox Event
+   ↓
+Outbox Worker
+   ↓
+Kafka
+   ↓
+Notification Worker
+   ↓
+PostgreSQL notifications
+   ↓
+Frontend
+```
+
+For the current Render free-tier deployment, the API and worker processes run together in the same backend deployment using the production startup supervisor. This changes process placement, not the logical application architecture: the API still creates outbox records, the outbox worker publishes events, and the notification worker consumes events and writes notifications.
+
+---
+
+# CI/CD Pipeline
+
+The project uses **GitHub Actions for Continuous Integration** and **Vercel/Render Git-based deployments for Continuous Deployment**.
+
+## Continuous Integration
+
+GitHub Actions runs automatically for pushes to `master`/`main` and for pull requests targeting those branches.
+
+The CI workflow contains two independent jobs:
+
+```text
+GitHub Push / Pull Request
+           │
+     ┌─────┴─────┐
+     ▼           ▼
+Backend CI   Frontend CI
+     │           │
+     │           ├── npm ci
+     │           ├── npm run lint
+     │           └── npm run build
+     │
+     ├── Start PostgreSQL service
+     ├── Start Redis service
+     ├── npm ci
+     ├── Run database migrations
+     └── npm test
+```
+
+Backend CI uses temporary PostgreSQL and Redis service containers so the integration tests execute against real infrastructure instead of mocks for those components. The database schema is created through the same migration runner used by the application.
+
+Current backend CI verification includes:
+
+```text
+30 Jest tests
+10 test suites
+```
+
+The frontend CI verifies both code quality and production buildability through ESLint and Vite.
+
+## Protected `master` branch
+
+The `master` branch is protected. Changes are normally introduced through a pull request rather than direct pushes.
+
+The branch requires these status checks to pass before merging:
+
+```text
+Backend CI   ✅
+Frontend CI  ✅
+```
+
+Branches must also be up to date with `master` before merging. This ensures that the code being merged has been tested against the latest base branch.
+
+## Continuous Deployment
+
+After a pull request passes CI and is merged into `master`, deployment is handled automatically by the connected hosting platforms.
+
+### Vercel
+
+Vercel automatically creates production deployments for changes merged into the configured production branch. Pull requests also receive Vercel preview deployments.
+
+```text
+master
+  ↓
+Vercel
+  ↓
+Production frontend deployment
+```
+
+### Render
+
+Render is configured with **After CI Checks Pass** for the backend service. The backend service watches the `master` branch and automatically deploys a new backend version after the required CI checks pass.
+
+```text
+master commit
+     ↓
+GitHub Actions
+     ↓
+CI checks pass
+     ↓
+Render Auto-Deploy
+     ↓
+Backend deployment
+```
+
+The production deployment flow was verified end-to-end by changing a backend file on a feature branch, opening a pull request, passing both required CI jobs, merging into `master`, and observing an automatic Render deployment triggered as `Auto-Deploy`.
+
+## End-to-end development workflow
+
+```text
+Developer
+   │
+   ▼
+feature/<change>
+   │
+   ▼
+git push
+   │
+   ▼
+Pull Request → master
+   │
+   ▼
+GitHub Actions
+   ├── Backend CI ✅
+   └── Frontend CI ✅
+   │
+   ▼
+Merge
+   │
+   ▼
+Protected master
+   │
+   ├──────────────► Vercel → Production frontend 🚀
+   │
+   └──────────────► Render → Production backend 🚀
+```
+
+This provides an automated path from source-code changes to tested and deployed production code without requiring a manual deployment action after a normal merge.
+
+---
+
+
+---
+
 # Docker Setup
 
 The entire platform is managed by Docker Compose.
@@ -920,10 +1119,8 @@ Potential future improvements include:
 - Metrics and tracing
 - Dead-letter handling
 - Configurable retry/backoff policies
-- CI/CD pipeline
 - Production secret management
 - Multi-broker Kafka deployment
-- Production deployment automation
 - Expanded observability
 
 These are intentionally outside the current scope.
