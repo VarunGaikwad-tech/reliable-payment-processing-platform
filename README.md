@@ -3,6 +3,7 @@
 A production-style payment processing platform built to demonstrate backend engineering, distributed systems, database correctness, concurrency control, asynchronous processing, and reliability patterns.
 
 The platform simulates an internal payment system where authenticated users can manage accounts and transfer funds between them.
+About the deployment CI/CD pipeline verified through GitHub Actions, Vercel, and Render.
 
 > **Note:** This is an educational/internal simulation. It does not process real money and does not implement real banking, KYC, or external payment-network integrations.
 
