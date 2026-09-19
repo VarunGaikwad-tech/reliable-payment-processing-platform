@@ -1,5 +1,5 @@
 //Responsible for Starting the HTTP server.
-
+// Production server entry point
 const app = require("./app");
 const config = require("./config/env");
 const pool = require("./config/db");
